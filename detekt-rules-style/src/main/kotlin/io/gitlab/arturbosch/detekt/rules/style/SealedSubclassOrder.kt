@@ -21,9 +21,9 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameOrNull
 import org.jetbrains.kotlin.resolve.descriptorUtil.getSuperInterfaces
 
 /**
- * Detects enum entries declared out of alphabetical order when either the enum itself or one of its super interfaces
- * is decorated with the configured annotation. Keeping enum entries in order, where appropriate, allows for
- * easy scanning of a large enum and makes for smaller diffs and less merge conflicts in pull requests.
+ * Detects sealed subclasses declared out of alphabetical order when either the sealed class itself or one of its super types
+ * is decorated with the @Alphabetical annotation. Keeping sealed subclasses in order, where appropriate, allows for
+ * easy scanning of a large sealed class and makes for smaller diffs and less merge conflicts in pull requests.
  *
  *  <noncompliant>
  *  @@Alphabetical
@@ -59,7 +59,7 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.getSuperInterfaces
  *  </noncompliant>
  */
 @RequiresTypeResolution
-class EnumEntryOrder(config: Config = Config.empty) : Rule(config) {
+class SealedSubclassOrder(config: Config = Config.empty) : Rule(config) {
 
     override val issue: Issue = Issue(
         id = "EnumEntryOrder",
