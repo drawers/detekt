@@ -61,6 +61,17 @@ fun BaseRule.compileAndLintWithContext(
     return lintWithContext(environment, content)
 }
 
+fun BaseRule.compileAndLintWithContext(
+    environment: KotlinCoreEnvironment,
+    @Language("kotlin") content: String,
+    @Language("kotlin") vararg additionalContents: String,
+): List<Finding> {
+    if (shouldCompileTestSnippets) {
+        KotlinScriptEngine.compile(content)
+    }
+    return lintWithContext(environment, content, *additionalContents)
+}
+
 fun BaseRule.lint(ktFile: KtFile): List<Finding> = findingsAfterVisit(ktFile)
 
 private fun BaseRule.findingsAfterVisit(

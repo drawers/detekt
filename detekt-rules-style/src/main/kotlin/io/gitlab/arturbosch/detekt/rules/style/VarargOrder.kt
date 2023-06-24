@@ -7,9 +7,12 @@ import io.gitlab.arturbosch.detekt.api.Entity
 import io.gitlab.arturbosch.detekt.api.Issue
 import io.gitlab.arturbosch.detekt.api.Rule
 import io.gitlab.arturbosch.detekt.api.Severity
+import io.gitlab.arturbosch.detekt.api.config
+import io.gitlab.arturbosch.detekt.api.internal.Configuration
 import io.gitlab.arturbosch.detekt.api.internal.RequiresTypeResolution
+import io.gitlab.arturbosch.detekt.rules.fqNameOrNull
+import org.jetbrains.kotlin.psi.KtAnnotatedExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
-import org.jetbrains.kotlin.psi.KtUserType
 import org.jetbrains.kotlin.psi.KtValueArgument
 import org.jetbrains.kotlin.resolve.calls.components.isVararg
 import org.jetbrains.kotlin.resolve.calls.util.getResolvedCall
@@ -25,11 +28,9 @@ import org.jetbrains.kotlin.resolve.calls.util.getResolvedCall
  * use this annotation to decorate only the specific calls to [listOf] etc. that you want to check for order.
  *
  *  <noncompliant>
- *  @@Alphabetical
  *  val fruits = @@Alphabetical listOf("banana", "apple")
  *  </noncompliant>
  *  <compliant>
- *  @@Alphabetical
  *  val fruits = @@Alphabetical listOf("apple", "banana")
  *  </compliant>
  *
@@ -38,32 +39,48 @@ import org.jetbrains.kotlin.resolve.calls.util.getResolvedCall
 class VarargOrder(config: Config = Config.empty) : Rule(config) {
 
     override val issue: Issue = Issue(
-        id = "VarargEntryOrder",
+        id = "VarargOrder",
         Severity.Style,
         "Vararg arguments are not passed in alphabetical order.",
         debt = Debt.FIVE_MINS
     )
 
+    @Configuration(
+        "A list of fully-qualified names of annotations that can decorate a call expression with vararg."
+    )
+    private val includeAnnotations: List<String> by config(
+        listOf("io.gitlab.arturbosch.detekt.annotations.Alphabetical")
+    )
+
     override fun visitCallExpression(expression: KtCallExpression) {
         super.visitCallExpression(expression)
 
-//        (expression.parent as KtAnnotatedExpression).annotationEntries.map { it.typeReference?.typeElement?.safeAs<KtUserType>()?.referencedName }
+        val annotatedExpression = expression.parent as? KtAnnotatedExpression ?: return
+
+        if (!annotatedExpression.anyAnnotationInConfig()) {
+            return
+        }
+
         if (expression.valueArguments.isEmpty()) return
 
         val callableDescriptor =
             expression.calleeExpression.getResolvedCall(bindingContext)?.resultingDescriptor ?: return
 
-        val valueParameterDescriptor = callableDescriptor
-            .valueParameters
-            .singleOrNull() // only interested in listOf(), setOf() etc. TODO can expand here
-            ?: return
+        // keep rule simple by restricting it to calls with a single vararg parameter
+        if (callableDescriptor.valueParameters.size > 1) {
+            return
+        }
 
-        if (!valueParameterDescriptor.isVararg) return
+        if (!callableDescriptor.valueParameters.first().isVararg) {
+            return
+        }
 
-        val zipped = expression.valueArguments.sortedBy { it.text }
-            .zip(expression.valueArguments) { expected, actual ->
-                Arg(expected, actual)
-            }
+        val zipped =
+            expression.valueArguments
+                .sortedBy { it.text }
+                .zip(expression.valueArguments) { expected, actual ->
+                    Arg(expected, actual)
+                }
 
         val firstOutOfOrder = zipped.firstOrNull { it.expected.text != it.actual.text } ?: return
 
@@ -76,6 +93,15 @@ class VarargOrder(config: Config = Config.empty) : Rule(config) {
             )
         )
     }
+
+    private fun KtAnnotatedExpression.anyAnnotationInConfig() =
+        annotationEntries.any {
+            it.getResolvedCall(bindingContext)
+                ?.resultingDescriptor // the <init> constructor of the annotation
+                ?.returnType
+                ?.fqNameOrNull()
+                ?.asString() in includeAnnotations
+        }
 
     private class Arg(
         val expected: KtValueArgument,
