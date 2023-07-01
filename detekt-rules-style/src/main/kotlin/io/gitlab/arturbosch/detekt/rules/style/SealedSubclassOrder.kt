@@ -10,13 +10,15 @@ import io.gitlab.arturbosch.detekt.api.Severity
 import io.gitlab.arturbosch.detekt.api.config
 import io.gitlab.arturbosch.detekt.api.internal.Configuration
 import io.gitlab.arturbosch.detekt.api.internal.RequiresTypeResolution
+import io.gitlab.arturbosch.detekt.rules.fqNameOrNull
 import io.gitlab.arturbosch.detekt.rules.identifierName
 import org.jetbrains.kotlin.backend.common.pop
 import org.jetbrains.kotlin.backend.common.push
 import org.jetbrains.kotlin.descriptors.ClassDescriptor
+import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtClassOrObject
-import org.jetbrains.kotlin.psi.KtEnumEntry
 import org.jetbrains.kotlin.resolve.BindingContext
+import org.jetbrains.kotlin.resolve.calls.util.getResolvedCall
 import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameOrNull
 import org.jetbrains.kotlin.resolve.descriptorUtil.getSuperInterfaces
 
@@ -27,14 +29,16 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.getSuperInterfaces
  *
  *  <noncompliant>
  *  @@Alphabetical
- *  enum class Fruit {
- *      BANANA, APPLE
+ *  sealed class Fruit {
+ *      object Banana: Fruit()
+ *      object Apple: Fruit()
  *  }
  *  </noncompliant>
  *  <compliant>
  *  @@Alphabetical
- *  enum class Fruit {
- *      APPLE, BANANA
+ *  sealed class Fruit {
+ *      object Apple: Fruit()
+ *      object Banana: Fruit()
  *  }
  *  </compliant>
  *  <noncompliant>
@@ -42,9 +46,9 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.getSuperInterfaces
  *  interface Edible {
  *      val calories: Int
  *  }
- *  enum class Fruit(override val calories: Int): Edible {
- *      BANANA(100),
- *      APPLE(75)
+ *  sealed class Fruit(override val calories: Int): Edible {
+ *     object Banana: Fruit(100),
+ *     object Apple: Fruit(75)
  *  }
  *  </noncompliant>
  *  <compliant>
@@ -52,9 +56,9 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.getSuperInterfaces
  *  interface Edible {
  *      val calories: Int
  *  }
- *  enum class Fruit(override val calories: Int): Edible {
- *      APPLE(75),
- *      BANANA(100)
+ *  sealed class Fruit(override val calories: Int): Edible {
+ *     object Apple: Fruit(75)
+ *     object Banana: Fruit(100),
  *  }
  *  </noncompliant>
  */
@@ -62,41 +66,53 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.getSuperInterfaces
 class SealedSubclassOrder(config: Config = Config.empty) : Rule(config) {
 
     override val issue: Issue = Issue(
-        id = "EnumEntryOrder",
+        id = "SealedSubclassOrder",
         Severity.Style,
-        "Enum entries are not declared in alphabetical order.",
+        "Sealed subclasses are not declared in alphabetical order.",
         debt = Debt.FIVE_MINS
     )
 
     @Configuration(
-        "A list of fully-qualified names of annotations that can decorate an enum or one of its super interfaces."
+        "A list of fully-qualified names of annotations that can decorate a sealed class or one of its super types."
     )
     private val includeAnnotations: List<String> by config(
         listOf("io.gitlab.arturbosch.detekt.annotations.Alphabetical")
     )
 
     override fun visitClassOrObject(classOrObject: KtClassOrObject) {
-        super.visitClassOrObject(classOrObject)
-
-        val enumEntries = classOrObject.body?.enumEntries ?: return
-        if (enumEntries.isEmpty()) {
+        if (!classOrObject.hasModifier(KtTokens.SEALED_KEYWORD)) {
             return
         }
 
-        val classDescriptor = bindingContext[BindingContext.CLASS, classOrObject] ?: return
+        val sealedSuperTypeDescriptor = bindingContext[BindingContext.CLASS, classOrObject] ?: return
+        val sealedSuperTypeName = sealedSuperTypeDescriptor.fqNameOrNull() ?: return
 
         // use BFS because we assume the annotation is more likely to be found in shallower nodes
         // when we start searching from the enum class descriptor itself
         val classWithAnnotation =
-            classDescriptor.breadthFirstSearchInSuperInterfaces { it.anyIncludeAnnotations() } ?: return
+            sealedSuperTypeDescriptor.breadthFirstSearchInSuperInterfaces { it.anyIncludeAnnotations() } ?: return
 
-        val zipped = enumEntries.sortedBy { it.nameAsSafeName }
-            .zip(enumEntries) { expected: KtEnumEntry, actual: KtEnumEntry ->
-                EntryPair(expected, actual)
+        // search for annotation
+        val sealedSubclassDeclarations = classOrObject.declarations
+            .filterIsInstance<KtClassOrObject>()
+            .filter {
+                it.getSuperTypeList()?.entries?.any { superType ->
+                    superType.getResolvedCall(bindingContext)
+                        ?.resultingDescriptor
+                        ?.returnType
+                        ?.fqNameOrNull() == sealedSuperTypeName
+                } ?: false
             }
 
-        val firstOutOfOrder =
-            zipped.firstOrNull { it.expected.nameAsSafeName != it.actual.nameAsSafeName } ?: return
+        val zipped = sealedSubclassDeclarations.sortedBy {
+            it.name.orEmpty()
+        }.zip(sealedSubclassDeclarations) { expected: KtClassOrObject, actual: KtClassOrObject ->
+            SubClassPair(expected = expected, actual = actual)
+        }
+
+        val firstOutOfOrder = zipped.firstOrNull {
+            it.actual.name != it.expected.name
+        } ?: return
 
         report(
             CodeSmell(
@@ -126,27 +142,27 @@ class SealedSubclassOrder(config: Config = Config.empty) : Rule(config) {
     private fun ClassDescriptor.anyIncludeAnnotations() =
         annotations.any { it.fqName?.asString() in includeAnnotations }
 
-    private class EntryPair(
-        val expected: KtEnumEntry,
-        val actual: KtEnumEntry,
+    private class SubClassPair(
+        val expected: KtClassOrObject,
+        val actual: KtClassOrObject,
     ) {
         override fun toString(): String {
-            return "EntryPair(expected=${expected.name}, actual=${actual.name})"
+            return "SubClassPair(expected=${expected.identifierName()}, actual=${actual.identifierName()})"
         }
     }
 
     private fun buildMessage(
-        enum: KtClassOrObject,
+        sealedClass: KtClassOrObject,
         classWithAnnotation: ClassDescriptor,
-        firstOutOfOrder: EntryPair
+        firstOutOfOrder: SubClassPair
     ) = buildString {
-        append("Entries for enum `${enum.identifierName()}` ")
-        if (enum.fqName != classWithAnnotation.fqNameOrNull()) {
+        append("Sealed subclasses for class `${sealedClass.identifierName()}` ")
+        if (sealedClass.fqName != classWithAnnotation.fqNameOrNull()) {
             append("(which implements `${classWithAnnotation.name.identifier}`) ")
         }
         append("are not declared in alphabetical order. ")
-        append("Reorder so that `${firstOutOfOrder.expected.identifierName()}` ")
-        append("is before `${firstOutOfOrder.actual.identifierName()}`.")
+        append("Reorder so that `${firstOutOfOrder.expected.name}` ")
+        append("is before `${firstOutOfOrder.actual.name}`.")
     }
 
     companion object {
