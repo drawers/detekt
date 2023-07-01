@@ -4,6 +4,7 @@ import io.gitlab.arturbosch.detekt.rules.KotlinCoreEnvironmentTest
 import io.gitlab.arturbosch.detekt.test.TestConfig
 import io.gitlab.arturbosch.detekt.test.assertThat
 import io.gitlab.arturbosch.detekt.test.compileAndLintWithContext
+import org.intellij.lang.annotations.Language
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
@@ -17,15 +18,20 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
         )
     )
 
+    @Language("Kotlin")
+    private val annotation = """
+        package com.example
+        
+        annotation class Alphabetical
+    """.trimIndent()
+
     @Nested
     inner class `annotation on enum` {
         @Test
         fun `reports out of order`() {
             val code = """
-                package com.example
-    
-                annotation class Alphabetical
-    
+                import com.example.Annotation
+        
                 @Alphabetical
                 enum class Fruit {
                     BANANA,
@@ -33,7 +39,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }         
             """.trimIndent()
 
-            val findings = subject.compileAndLintWithContext(env, code)
+            val findings = subject.compileAndLintWithContext(env, code, annotation)
             assertThat(findings).hasSize(1)
             assertThat(findings[0]).hasSourceLocation(7, 5)
             assertThat(findings[0]).hasMessage(
@@ -45,9 +51,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
         @Test
         fun `does not report in order`() {
             val code = """
-                package com.example
-    
-                annotation class Alphabetical
+                import com.example.Annotation
     
                 @Alphabetical
                 enum class Fruit {
@@ -56,16 +60,14 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }         
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code)).isEmpty()
+            assertThat(subject.compileAndLintWithContext(env, code, annotation)).isEmpty()
         }
 
         @Test
         fun `does not report empty enum`() {
             val code = """
-                package com.example
-    
-                annotation class Alphabetical
-    
+                import com.example.Annotation
+        
                 @Alphabetical
                 enum class Fruit
 
@@ -76,16 +78,14 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code))
+            assertThat(subject.compileAndLintWithContext(env, code, annotation))
                 .isEmpty()
         }
 
         @Test
         fun `does not report nested enum`() {
             val code = """
-                package com.example
-                    
-                annotation class Alphabetical
+                import com.example.Annotation
                 
                 @Alphabetical
                 enum class Meal {
@@ -99,7 +99,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }                
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code))
+            assertThat(subject.compileAndLintWithContext(env, code, annotation))
                 .isEmpty()
         }
 
@@ -109,10 +109,8 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
 
             @Suppress("EnumEntryName")
             val code = """
-                package com.example
-    
-                annotation class Alphabetical
-    
+                import com.example.Annotation
+        
                 @Alphabetical
                 enum class Fruit {
                     `🍒`,
@@ -120,7 +118,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }         
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code))
+            assertThat(subject.compileAndLintWithContext(env, code, annotation))
                 .hasSize(1)
                 .hasTextLocations("`🍒`,")
         }
@@ -129,9 +127,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
         fun `reports names in backticks out of order`() {
             @Suppress("EnumEntryName")
             val code = """
-                package com.example
-    
-                annotation class Alphabetical
+                import com.example.Annotation
     
                 @Alphabetical
                 enum class Fruit {
@@ -140,7 +136,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }         
             """.trimIndent()
 
-            val findings = subject.compileAndLintWithContext(env, code)
+            val findings = subject.compileAndLintWithContext(env, code, annotation)
             assertThat(findings).hasSize(1)
             assertThat(findings[0]).hasMessage(
                 "Entries for enum `Fruit` are not declared in alphabetical order. " +
@@ -152,10 +148,8 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
         fun `reports keyword names out of order`() {
             @Suppress("EnumEntryName")
             val code = """
-                package com.example
-    
-                annotation class Alphabetical
-    
+                import com.example.Annotation
+        
                 @Alphabetical
                 enum class Fruit {
                     `null`,
@@ -163,17 +157,15 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }         
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code))
+            assertThat(subject.compileAndLintWithContext(env, code, annotation))
                 .hasSize(1)
         }
 
         @Test
         fun `reports out of order for more complex enum`() {
             val code = """
-                package com.example
-    
-                annotation class Alphabetical
-    
+                import com.example.Annotation
+        
                 @Alphabetical
                 enum class Fruit(val id: String) {                
                     BANANA("banana") {
@@ -199,7 +191,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }         
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code))
+            assertThat(subject.compileAndLintWithContext(env, code, annotation))
                 .hasSize(1)
         }
     }
@@ -210,9 +202,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
         fun `reports out of order for super interface`() {
             val code = """
                 package com.example
-                
-                annotation class Alphabetical
-                
+                                
                 @Alphabetical
                 interface Identifiable {
                     val id: String
@@ -224,7 +214,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }
             """.trimIndent()
 
-            val findings = subject.compileAndLintWithContext(env, code)
+            val findings = subject.compileAndLintWithContext(env, code, annotation)
             assertThat(findings).hasSize(1)
             assertThat(findings[0]).hasMessage(
                 "Entries for enum `Fruit` (which implements `Identifiable`) are not declared " +
@@ -236,8 +226,6 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
         fun `reports out of order for super super interface`() {
             val code = """
                 package com.example                
-
-                annotation class Alphabetical
                 
                 @Alphabetical
                 interface Identifiable {
@@ -256,15 +244,13 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code)).hasSize(1)
+            assertThat(subject.compileAndLintWithContext(env, code, annotation)).hasSize(1)
         }
 
         @Test
         fun `reports interface with recursive type parameters out of order`() {
             val code = """
                 package com.example                
-
-                annotation class Alphabetical
                                 
                 @Alphabetical
                 interface Tree<T : Tree<T>> {
@@ -281,7 +267,7 @@ class EnumEntryOrderSpec(private val env: KotlinCoreEnvironment) {
                 }
             """.trimIndent()
 
-            assertThat(subject.compileAndLintWithContext(env, code)).hasSize(1)
+            assertThat(subject.compileAndLintWithContext(env, code, annotation)).hasSize(1)
         }
     }
 }
